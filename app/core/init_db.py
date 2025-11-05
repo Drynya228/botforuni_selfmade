@@ -1,5 +1,7 @@
 # app/core/init_db.py
-from app.core.db import db
+from loguru import logger
+
+from app.core.db import DATABASE_URL, db
 
 SCHEMA_SQL = """
 create table if not exists messages (
@@ -26,5 +28,9 @@ create table if not exists tracked_chats (
 """
 
 async def ensure_schema():
+    if not DATABASE_URL:
+        logger.warning("DATABASE_URL missing — skipping schema creation")
+        return
     async with db() as conn:
         await conn.execute(SCHEMA_SQL)
+        logger.info("DB schema ensured")

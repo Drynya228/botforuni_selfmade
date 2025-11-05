@@ -1,33 +1,54 @@
-from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
 import os
+from dataclasses import dataclass, field
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+from dotenv import load_dotenv
 
-    BOT_TOKEN: str = ""
-    WEBHOOK_URL: str = ""
-    DATABASE_URL: str
-    REDIS_URL: str
+load_dotenv()
 
-    S3_ENDPOINT: str
-    S3_ACCESS_KEY: str
-    S3_SECRET_KEY: str
-    S3_BUCKET: str = "files"
 
-    TIMEZONE: str = "Europe/Moscow"
-    ASR_ENABLED: bool = True
-    OCR_ENABLED: bool = True
+def _env(name: str, default: str = "") -> str:
+    """Read environment variable stripping whitespace."""
 
-    EMBEDDINGS_PROVIDER: str = "dummy"  # or openai
-    OPENAI_API_KEY: str | None = None
-    EMBEDDING_MODEL: str = "text-embedding-3-large"
-    LLM_PROVIDER: str = "dummy"  # or openai
-    LLM_MODEL: str = "gpt-4o-mini"
-    MASK_PII: bool = False
-    OWNER_IDS: str | None = None
+    return (os.getenv(name) or default).strip()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass(slots=True)
+class Settings:
+    BOT_TOKEN: str = field(default_factory=lambda: _env("BOT_TOKEN"))
+    WEBHOOK_URL: str = field(default_factory=lambda: _env("WEBHOOK_URL"))
+    DATABASE_URL: str = field(default_factory=lambda: _env("DATABASE_URL"))
+    REDIS_URL: str = field(
+        default_factory=lambda: (
+            _env("REDIS_URL")
+            or _env("REDIS_TLS_URL")
+            or "redis://localhost:6379/0"
+        )
+    )
+    TIMEZONE: str = field(default_factory=lambda: _env("TIMEZONE", "Europe/Moscow"))
+    ASR_ENABLED: bool = field(default_factory=lambda: _env_bool("ASR_ENABLED", True))
+    OCR_ENABLED: bool = field(default_factory=lambda: _env_bool("OCR_ENABLED", True))
+    EMBEDDINGS_PROVIDER: str = field(
+        default_factory=lambda: _env("EMBEDDINGS_PROVIDER", "dummy")
+    )
+    OPENAI_API_KEY: str | None = field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY")
+    )
+    EMBEDDING_MODEL: str = field(
+        default_factory=lambda: _env("EMBEDDING_MODEL", "text-embedding-3-large")
+    )
+    LLM_PROVIDER: str = field(default_factory=lambda: _env("LLM_PROVIDER", "dummy"))
+    LLM_MODEL: str = field(default_factory=lambda: _env("LLM_MODEL", "gpt-4o-mini"))
+    MASK_PII: bool = field(default_factory=lambda: _env_bool("MASK_PII", False))
+    OWNER_ID: int = field(
+        default_factory=lambda: int((_env("OWNER_ID") or "0") or "0")
+    )
+
 
 cfg = Settings()
-
-class OwnerConfig(BaseModel):
-    owners: set[int] = set(int(x) for x in (cfg.OWNER_IDS.split(",") if cfg.OWNER_IDS else []) if x)
