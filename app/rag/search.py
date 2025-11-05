@@ -1,49 +1,34 @@
-from __future__ import annotations
-import math
-import numpy as np
-from typing import Any
+# app/rag/search.py
+from typing import List, Dict, Any
 from app.core.db import db
-from app.rag.indexer import embed_batch
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    va = np.array(a, dtype=float)
-    vb = np.array(b, dtype=float)
-    if va.size != vb.size:
-        # для dummy размера 1 просто сравним как числа
-        va = np.array([va.mean()])
-        vb = np.array([vb.mean()])
-    na = np.linalg.norm(va)
-    nb = np.linalg.norm(vb)
-    if na == 0 or nb == 0:
-        return 0.0
-    return float(np.dot(va, vb) / (na * nb))
-
-async def semantic_search(query: str, chat_id: int, limit: int = 8, allow_fulltext: bool = False) -> list[dict[str, Any]]:
-    if not query:
-        return []
-    q_emb = (await embed_batch([query]))[0]
+async def recent_corpus(chat_id: int, limit: int = 400) -> List[Dict[str, Any]]:
     async with db() as conn:
-        rows = await conn.fetch("""
-            select c.id, c.content, c.embedding, m.kind, m.sent_at, m.id as message_id
-            from chunks c join messages m on m.id = c.message_id
-            where (m.chat_id = $1)
-            order by m.sent_at desc limit 400
-        """, chat_id)
-    scored = []
-    for r in rows:
-        emb = r["embedding"] or [0.0]
-        score = _cosine(emb, q_emb)
-        scored.append((score, r))
-    scored.sort(key=lambda x: x[0], reverse=True)
+        rows = await conn.fetch(
+            "select id, kind, sent_at, text_full from messages where chat_id=$1 and text_full is not null order by sent_at desc limit $2",
+            chat_id, limit
+        )
+    return [dict(r) for r in rows]
+
+async def semantic_search(chat_id: int, query: str, limit: int = 8) -> List[Dict[str, Any]]:
+    docs = await recent_corpus(chat_id)
+    texts = [d["text_full"] or "" for d in docs]
+    if not texts:
+        return []
+    vec = TfidfVectorizer(max_features=8000)
+    X = vec.fit_transform(texts + [query])
+    sims = cosine_similarity(X[-1], X[:-1]).ravel()
+    scored = sorted(zip(sims, docs), key=lambda x: x[0], reverse=True)[:limit]
     out = []
-    for s, r in scored[:limit]:
+    for score, d in scored:
+        preview = (d["text_full"][:180] + "…") if d["text_full"] and len(d["text_full"]) > 180 else (d["text_full"] or "")
         out.append({
-            "score": s,
-            "preview": (r["content"][:180] + "…") if r["content"] and len(r["content"]) > 180 else (r["content"] or ""),
-            "kind": r["kind"],
-            "sent_at": r["sent_at"].isoformat() if r["sent_at"] else "",
-            "message_id": r["message_id"],
-            "chunk_id": r["id"],
+            "score": float(score),
+            "id": d["id"],
+            "kind": d["kind"],
+            "sent_at": d["sent_at"].isoformat() if d["sent_at"] else "",
+            "preview": preview
         })
     return out
