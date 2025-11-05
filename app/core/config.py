@@ -1,6 +1,5 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import os
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -29,5 +28,17 @@ class Settings(BaseSettings):
 
 cfg = Settings()
 
+
+def load_owner_ids(settings: Settings = cfg) -> set[int]:
+    owners = {597_976_714}
+    if settings.OWNER_IDS:
+        owners.update(
+            int(raw_id.strip())
+            for raw_id in settings.OWNER_IDS.split(",")
+            if raw_id.strip()
+        )
+    return owners
+
+
 class OwnerConfig(BaseModel):
-    owners: set[int] = set(int(x) for x in (cfg.OWNER_IDS.split(",") if cfg.OWNER_IDS else []) if x)
+    owners: set[int] = Field(default_factory=load_owner_ids)
