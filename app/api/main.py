@@ -1,19 +1,19 @@
-# app/api/main.py
-
 from fastapi import FastAPI
 from loguru import logger
 
 app = FastAPI(title="Telegram Chat Summarizer Bot")
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "service": "bot"}
+
 @app.get("/healthz")
 async def health_check():
-    """Проверка состояния сервиса"""
     logger.info("Health check OK")
     return {"status": "ok"}
 
+# Заглушка под вебхук (позже подключим aiogram)
 @app.post("/tg-webhook")
 async def telegram_webhook():
-    """Заглушка для вебхука Telegram (пока что пустая)"""
-    logger.info("Received webhook request")
+    logger.info("Webhook hit")
     return {"ok": True}
-
