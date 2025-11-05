@@ -1,9 +1,15 @@
+# app/ingestion/ocr.py
+import os
 from PIL import Image
 import pytesseract
-from app.core.config import cfg
+
+OCR_ENABLED = (os.getenv("OCR_ENABLED", "true").lower() == "true")
 
 async def ocr_photo(path: str) -> str:
-    if not cfg.OCR_ENABLED:
+    if not OCR_ENABLED:
         return ""
-    img = Image.open(path)
-    return pytesseract.image_to_string(img, lang="rus+eng").strip()
+    try:
+        img = Image.open(path)
+        return pytesseract.image_to_string(img, lang="rus+eng").strip()
+    except Exception:
+        return ""
