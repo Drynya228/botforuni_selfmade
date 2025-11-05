@@ -1,8 +1,15 @@
+# app/api/main.py
 from fastapi import FastAPI, Request
 from loguru import logger
 from app.bot_runtime import process_update
+from app.core.init_db import ensure_schema
 
 app = FastAPI(title="Telegram Chat Summarizer Bot")
+
+@app.on_event("startup")
+async def _startup():
+    await ensure_schema()
+    logger.info("DB schema ensured")
 
 @app.get("/")
 async def root():
@@ -10,7 +17,6 @@ async def root():
 
 @app.get("/healthz")
 async def health_check():
-    logger.info("Health check OK")
     return {"status": "ok"}
 
 @app.post("/tg-webhook")
