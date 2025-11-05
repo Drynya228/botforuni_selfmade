@@ -1,6 +1,5 @@
-import asyncio
-import asyncpg
-from app.core.config import cfg
+# app/core/init_db.py
+from app.core.db import db
 
 SCHEMA_SQL = """
 create table if not exists messages (
@@ -9,31 +8,19 @@ create table if not exists messages (
   telegram_message_id bigint,
   sender_id bigint,
   sent_at timestamptz not null,
-  kind text not null,
+  kind text not null,               -- text|photo|document|voice|video_note|video
   text_full text,
   file_id text,
-  file_path text,
+  file_name text,
   meta jsonb default '{}'::jsonb
 );
-
-create table if not exists chunks (
-  id bigserial primary key,
-  message_id bigint references messages(id) on delete cascade,
-  chunk_index int not null,
-  content text not null,
-  embedding double precision[], -- храним массив; для простоты вместо pgvector
-  meta jsonb default '{}'::jsonb
-);
-
-create index if not exists idx_messages_chat_time on messages(chat_id, sent_at);
+create index if not exists idx_messages_chat_time on messages(chat_id, sent_at desc);
 """
 
-async def main():
-    conn = await asyncpg.connect(cfg.DATABASE_URL)
-    try:
+async def ensure_schema():
+    async with db() as conn:
         await conn.execute(SCHEMA_SQL)
-        print("DB schema ready")
-    finally:
+
         await conn.close()
 
 if __name__ == "__main__":
