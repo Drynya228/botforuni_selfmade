@@ -1,24 +1,25 @@
-import subprocess
-import tempfile
-from app.core.config import cfg
+# app/ingestion/asr.py
+import os, subprocess, tempfile
+
+ASR_ENABLED = (os.getenv("ASR_ENABLED", "true").lower() == "true")
 
 try:
-    from faster_whisper import WhisperModel
-    _whisper = WhisperModel("medium", compute_type="int8") if cfg.ASR_ENABLED else None
-except Exception:  # noqa: BLE001
+    if ASR_ENABLED:
+        from faster_whisper import WhisperModel
+        _whisper = WhisperModel("base", compute_type="int8")
+    else:
+        _whisper = None
+except Exception:
     _whisper = None
 
-
-def _extract_wav(src_path: str) -> str:
+def _to_wav16k(src: str) -> str:
     out = tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name
-    cmd = ["ffmpeg", "-y", "-i", src_path, "-vn", "-ac", "1", "-ar", "16000", out]
-    subprocess.run(cmd, check=True)
+    subprocess.run(["ffmpeg", "-y", "-i", src, "-vn", "-ac", "1", "-ar", "16000", out], check=True)
     return out
 
-async def transcribe_message(src_path: str) -> str:
-    if not cfg.ASR_ENABLED or _whisper is None:
-        return ""  # мягкий фолбэк
-    wav = _extract_wav(src_path)
+async def transcribe(path: str) -> str:
+    if not _whisper:
+        return ""
+    wav = _to_wav16k(path)
     segments, _ = _whisper.transcribe(wav, language="ru", vad_filter=True, beam_size=5)
-    text = " ".join(s.text for s in segments).strip()
-    return text
+    return " ".join(s.text for s in segments).strip()
