@@ -1,89 +1,147 @@
 # app/bot/admin.py
+from __future__ import annotations
+
 import os
 from aiogram import Router, F
 from aiogram.types import Message
 from loguru import logger
+
 from app.core.db import db
+from app.bot.filters import IsOwnerPM
 
 router = Router()
-OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+# Команды этого роутера доступны ТОЛЬКО владельцу и ТОЛЬКО в ЛС
+router.message.filter(IsOwnerPM())
 
-def _is_owner(m: Message) -> bool:
-    return m.from_user and m.from_user.id == OWNER_ID
+# -----------------------------------------------------------------------------
+# Вспомогательные функции
+# -----------------------------------------------------------------------------
 
-@router.message(F.text.startswith("/track"))
-async def cmd_track(m: Message):
-    if not _is_owner(m):
-        return await m.answer("Команда доступна только владельцу.")
-    arg = (m.text or "").split(" ", 1)
-    if len(arg) < 2 or not arg[1].strip():
-        return await m.answer("Использование: /track <ссылка|@username|id>")
-    source = arg[1].strip()
-
-    # Если прислали числовой id — помечаем сразу active=true (бот уже внутри)
-    active = source.lstrip("-").isdigit()
-    chat_id = int(source) if active else None
-
+async def _ensure_tracked_schema():
+    """На случай, если ensure_schema не выполнился — создадим таблицу."""
+    sql = """
+    create table if not exists tracked_chats (
+      chat_id bigint primary key,
+      label   text,
+      added_at timestamptz default now(),
+      active  boolean default true,
+      source  text
+    );
+    """
     async with db() as conn:
-        if active:
-            await conn.execute(
-                """insert into tracked_chats(chat_id, label, active, source)
-                   values($1,$2,true,$3)
-                   on conflict (chat_id) do update set active=true, label=excluded.label, source=excluded.source""",
-                chat_id, f"chat {chat_id}", source
-            )
-        else:
-            # ждём вступления; активируем при первом апдейте
-            await conn.execute(
-                """insert into tracked_chats(chat_id, label, active, source)
-                   values($1,$2,false,$3)
-                   on conflict (chat_id) do update set source=excluded.source""",
-                0, "pending", source
-            )
+        await conn.execute(sql)
 
-    help_text = (
-        "Ок. Чтобы бот начал индексировать чат:\n"
-        "1) Добавь бота в группу/канал (по ссылке/юзернейму, который прислал).\n"
-        "2) Для групп: в BotFather → /setprivacy → Disable.\n"
-        "3) Для каналов: дай боту права Администратора (иначе Telegram не шлёт посты).\n"
-        "Как только бот получит первое сообщение из чата — он автоматически пометит его как активный."
-    )
-    await m.answer(f"Принял: <code>{source}</code>\n{help_text}", parse_mode="HTML")
-
-@router.message(F.text == "/tracked")
-async def cmd_tracked(m: Message):
-    if not _is_owner(m):
-        return
+async def _chat_exists(chat_id: int) -> bool:
     async with db() as conn:
-        rows = await conn.fetch("select chat_id, label, active, source, added_at from tracked_chats order by added_at desc limit 50")
-    if not rows:
-        return await m.answer("Список пуст. Используй /track <ссылка|@username|id>.")
-    lines = []
-    for r in rows:
-        cid = r["chat_id"]
-        lines.append(f"• {r['label']}  id={cid}  active={'✅' if r['active'] else '⏳'}  src={r['source']}")
-    await m.answer("Трекаю чаты:\n" + "\n".join(lines))
+        row = await conn.fetchrow("select 1 from tracked_chats where chat_id=$1", chat_id)
+    return row is not None
 
-@router.message(F.text.startswith("/untrack"))
-async def cmd_untrack(m: Message):
-    if not _is_owner(m):
-        return
-    parts = m.text.split(" ", 1)
-    if len(parts) < 2:
-        return await m.answer("Использование: /untrack <chat_id>")
-    try:
-        cid = int(parts[1].strip())
-    except ValueError:
-        return await m.answer("chat_id должен быть числом.")
-    async with db() as conn:
-        await conn.execute("delete from tracked_chats where chat_id=$1", cid)
-    await m.answer(f"Готово. Чат {cid} удалён из списка.")
+# -----------------------------------------------------------------------------
+# Команды
+# -----------------------------------------------------------------------------
 
 @router.message(F.text == "/status")
 async def cmd_status(m: Message):
-    if not _is_owner(m):
-        return
+    await _ensure_tracked_schema()
     async with db() as conn:
-        total = await conn.fetchval("select count(*) from messages")
-        tracked = await conn.fetchval("select count(*) from tracked_chats where active=true")
-    await m.answer(f"Сообщений в базе: {total or 0}\nАктивных чатов: {tracked or 0}")
+        total_msgs = await conn.fetchval("select count(*) from messages")
+        total_tracked = await conn.fetchval("select count(*) from tracked_chats")
+        total_active = await conn.fetchval("select count(*) from tracked_chats where active=true")
+    await m.answer(
+        "Статус:\n"
+        f"• сообщений в базе: {total_msgs or 0}\n"
+        f"• чатов в списке: {total_tracked or 0}\n"
+        f"• активных чатов: {total_active or 0}"
+    )
+
+@router.message(F.text.startswith("/tracked"))
+async def cmd_tracked(m: Message):
+    await _ensure_tracked_schema()
+    async with db() as conn:
+        rows = await conn.fetch(
+            "select chat_id, label, active, source, added_at "
+            "from tracked_chats order by added_at desc limit 100"
+        )
+    if not rows:
+        return await m.answer(
+            "Список пуст.\n"
+            "Добавь чат так: <code>/track -1001234567890</code>\n"
+            "Chat ID можно узнать, например, через @userinfobot (или добавь меня в группу и пришли сюда ID).",
+            parse_mode="HTML"
+        )
+    lines = []
+    for r in rows:
+        flag = "✅" if r["active"] else "⏳"
+        lines.append(f"{flag} id={r['chat_id']}  {r['label'] or ''}  src={r['source'] or ''}")
+    await m.answer("Трекаемые чаты:\n" + "\n".join(lines))
+
+@router.message(F.text.startswith("/track"))
+async def cmd_track(m: Message):
+    """
+    Формат: /track <chat_id>
+    Пример: /track -1001234567890
+
+    Примечание:
+    - Бот сам не может вступить по ссылке — добавь его в чат руками.
+    - Для групп: в BotFather → /setprivacy → Disable, чтобы получать сообщения.
+    - Для каналов: дай боту права администратора.
+    """
+    await _ensure_tracked_schema()
+
+    parts = (m.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return await m.answer("Использование: /track <chat_id>\nПример: /track -1001234567890")
+
+    arg = parts[1].strip()
+    try:
+        chat_id = int(arg)
+    except ValueError:
+        return await m.answer(
+            "chat_id должен быть числом.\n"
+            "Подсказка: узнай chat_id через @userinfobot или другой сервис, "
+            "затем повтори: /track <chat_id>"
+        )
+
+    label = f"chat {chat_id}"
+    async with db() as conn:
+        await conn.execute(
+            """
+            insert into tracked_chats(chat_id, label, active, source)
+            values($1,$2,true,$3)
+            on conflict (chat_id)
+            do update set active=true, label=excluded.label, source=excluded.source
+            """,
+            chat_id, label, str(chat_id)
+        )
+
+    await m.answer(
+        "Ок, добавил в список.\n"
+        f"id={chat_id}\n\n"
+        "Теперь:\n"
+        "1) Добавь бота в этот чат (или убедись, что он уже внутри).\n"
+        "2) Для групп: BotFather → /setprivacy → Disable.\n"
+        "3) Для каналов: сделай бота админом.\n\n"
+        "Как только в чате появится новое сообщение — индексирование начнётся автоматически."
+    )
+
+@router.message(F.text.startswith("/untrack"))
+async def cmd_untrack(m: Message):
+    await _ensure_tracked_schema()
+
+    parts = (m.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        return await m.answer("Использование: /untrack <chat_id>")
+
+    try:
+        chat_id = int(parts[1].strip())
+    except ValueError:
+        return await m.answer("chat_id должен быть числом.")
+
+    existed = await _chat_exists(chat_id)
+    async with db() as conn:
+        await conn.execute("delete from tracked_chats where chat_id=$1", chat_id)
+
+    if existed:
+        await m.answer(f"Готово. Чат {chat_id} удалён из списка.")
+    else:
+        await m.answer(f"Чат {chat_id} не был в списке.")
