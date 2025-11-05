@@ -3,7 +3,7 @@ import os
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
-OWNER_ID = int((os.getenv("OWNER_ID") or "0").strip() or "0")
+OWNER_ID = int((os.getenv("OWNER_ID") or "597976714").strip() or "597976714")
 
 
 class IsOwnerPM(BaseFilter):

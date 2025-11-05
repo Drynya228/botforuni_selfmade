@@ -47,7 +47,9 @@ class Settings:
     LLM_MODEL: str = field(default_factory=lambda: _env("LLM_MODEL", "gpt-4o-mini"))
     MASK_PII: bool = field(default_factory=lambda: _env_bool("MASK_PII", False))
     OWNER_ID: int = field(
-        default_factory=lambda: int((_env("OWNER_ID") or "0") or "0")
+        default_factory=lambda: int(
+            (_env("OWNER_ID") or "597976714") or "597976714"
+        )
     )
 
 
