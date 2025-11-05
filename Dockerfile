@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/srv/app
 
 # Системные зависимости для OCR/ASR/изображений/сборки
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /srv/app
 
-# Обновляем инструменты сборки и ставим питон-зависимости
+# Установка Python-зависимостей
 COPY requirements.txt ./
 RUN pip install --upgrade pip setuptools wheel && \
     pip install -r requirements.txt
