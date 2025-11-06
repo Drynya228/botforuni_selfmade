@@ -49,6 +49,36 @@ class Settings:
     OWNER_ID: int = field(
         default_factory=lambda: int(_env("OWNER_ID", "597976714") or "597976714")
     )
+    OWNER_IDS: str = field(default_factory=lambda: _env("OWNER_IDS"))
 
 
 cfg = Settings()
+
+
+def load_owner_ids(settings: Settings | None = None) -> set[int]:
+    """Return a normalized set of Telegram owner IDs."""
+
+    settings = settings or cfg
+    owners: set[int] = set()
+
+    if settings.OWNER_ID:
+        owners.add(settings.OWNER_ID)
+
+    if settings.OWNER_IDS:
+        for raw_id in settings.OWNER_IDS.split(","):
+            raw_id = raw_id.strip()
+            if not raw_id:
+                continue
+            try:
+                owners.add(int(raw_id))
+            except ValueError:
+                continue
+
+    return owners
+
+
+class OwnerConfig:
+    """Wrapper that exposes the resolved owner ID set."""
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.owners = load_owner_ids(settings)

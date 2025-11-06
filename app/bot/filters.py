@@ -2,7 +2,10 @@
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 
-from app.core.config import cfg
+from app.core.config import OwnerConfig
+
+
+OWNER_IDS = OwnerConfig().owners
 
 
 class IsOwnerPM(BaseFilter):
@@ -11,7 +14,11 @@ class IsOwnerPM(BaseFilter):
     async def __call__(self, message: Message) -> bool:
         if not message.chat or message.chat.type != "private":
             return False
-        owner_id = cfg.OWNER_ID
-        if owner_id == 0:
+
+        if not message.from_user:
+            return False
+
+        if not OWNER_IDS:
             return True
-        return message.from_user is not None and message.from_user.id == owner_id
+
+        return message.from_user.id in OWNER_IDS
